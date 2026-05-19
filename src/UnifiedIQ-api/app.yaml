@@ -1,0 +1,46 @@
+# Databricks Apps manifest. Source root = this directory; Databricks installs
+# requirements.txt and runs `command`. The platform terminates SSO and injects
+# X-Forwarded-* identity, so AUTH_MODE=databricks (no Okta here).
+#
+# Secrets are app *resources* (declared via `databricks apps update`) and are
+# referenced here by resource name via `valueFrom` (a string, not a map).
+
+command:
+  - sh
+  - -c
+  - uvicorn app.main:app --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-8000}
+
+env:
+  - name: APP_ENV
+    value: prod
+  - name: AUTH_MODE
+    value: databricks
+  # Non-reasoning instruct model: returns plain-string JSON that instructor
+  # MD_JSON parses. gpt-oss-* are reasoning models (content is a parts list)
+  # and do NOT work with structured output here.
+  - name: LLM_DEFAULT_MODEL
+    value: databricks-meta-llama-3-3-70b-instruct
+  - name: LLM_EMBEDDING_MODEL
+    value: databricks-bge-large-en
+  # workspace.default is the writable Unity Catalog schema in this workspace
+  # (main.analytics does not exist here).
+  - name: WAREHOUSE_CATALOG
+    value: workspace
+  - name: WAREHOUSE_SCHEMA
+    value: default
+  - name: ALERTS_TABLE
+    value: workspace.default.unifiediq_alerts
+  - name: CORS_ORIGINS
+    value: ""
+  - name: LLM_BASE_URL
+    value: "https://dbc-85b951c8-d6b2.cloud.databricks.com/serving-endpoints"
+  - name: WAREHOUSE_SERVER_HOSTNAME
+    value: "dbc-85b951c8-d6b2.cloud.databricks.com"
+  - name: WAREHOUSE_HTTP_PATH
+    value: "/sql/1.0/warehouses/0487a6bd3a272a77"
+  - name: LLM_API_KEY
+    valueFrom: llm-api-key
+  - name: WAREHOUSE_ACCESS_TOKEN
+    valueFrom: warehouse-token
+  - name: SERVICE_PRINCIPAL_TOKEN
+    valueFrom: service-token

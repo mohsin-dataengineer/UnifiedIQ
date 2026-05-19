@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: ./src/UnifiedIQ-api
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    env_file:
+      - ./src/UnifiedIQ-api/.env
+    ports:
+      - "5000:5000"
+    depends_on:
+      - db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload
+    volumes:
+      - ./src/UnifiedIQ-api:/app
+
+  ui:
+    build:
+      context: ./products/UnifiedIQ-ui
+    env_file:
+      - ./products/UnifiedIQ-ui/.env.local
+    environment:
+      API_BASE_URL: http://api:5000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+  # Optional app-side store for telemetry/session/user-views (NOT the warehouse).
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: unifiediq
+      POSTGRES_PASSWORD: unifiediq
+      POSTGRES_DB: unifiediq
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

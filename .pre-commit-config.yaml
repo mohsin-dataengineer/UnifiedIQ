@@ -1,0 +1,35 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^src/UnifiedIQ-api/
+      - id: ruff-format
+        files: ^src/UnifiedIQ-api/
+
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd products/UnifiedIQ-ui && npx eslint .'
+        language: system
+        files: ^products/UnifiedIQ-ui/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: prettier
+        name: prettier
+        entry: bash -c 'cd products/UnifiedIQ-ui && npx prettier --write .'
+        language: system
+        files: ^products/UnifiedIQ-ui/.*\.(ts|tsx|css|json)$
+        pass_filenames: false
+
+  # Optional strict typing - enable in CI once the surface stabilizes.
+  # - repo: local
+  #   hooks:
+  #     - id: mypy
+  #       name: mypy --strict
+  #       entry: bash -c 'cd src/UnifiedIQ-api && mypy --strict app'
+  #       language: system
+  #       files: ^src/UnifiedIQ-api/app/.*\.py$
+  #       pass_filenames: false

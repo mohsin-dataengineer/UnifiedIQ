@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+next-env.d.ts
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Eval artifacts (keep the directory, drop the runs)
+src/UnifiedIQ-api/eval/results/*
+!src/UnifiedIQ-api/eval/results/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

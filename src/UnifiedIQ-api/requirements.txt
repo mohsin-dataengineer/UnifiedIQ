@@ -1,0 +1,16 @@
+# Runtime deps for Databricks Apps (mirrors pyproject [project].dependencies).
+# Databricks Apps install this; the local package is not pip-installed - the
+# app runs `uvicorn app.main:app` from this directory.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9
+pydantic-settings>=2.6
+openai>=1.54
+instructor>=1.6
+sqlglot>=25.0
+cachetools>=5.5
+httpx>=0.27
+pyjwt[crypto]>=2.9
+databricks-sql-connector>=3.4
+databricks-vectorsearch>=0.40
+pyarrow>=17.0

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "q01",
+    "tier": "core",
+    "question": "What is total revenue by region?",
+    "expected_intent": "data",
+    "expected_sql": "SELECT region, SUM(revenue) AS total_revenue FROM {table} GROUP BY region",
+    "expected_columns": ["region", "total_revenue"],
+    "required_patterns": ["GROUP BY"],
+    "forbidden_patterns": ["SELECT \\*"],
+    "expected_chart_type": "none",
+    "notes": "Basic aggregation; must not use SELECT *."
+  },
+  {
+    "id": "q02",
+    "tier": "core",
+    "question": "Show me the top 5 products by revenue as a bar chart.",
+    "expected_intent": "chart",
+    "expected_sql": "SELECT product, SUM(revenue) AS total_revenue FROM {table} GROUP BY product ORDER BY total_revenue DESC LIMIT 5",
+    "expected_columns": ["product", "total_revenue"],
+    "required_patterns": ["ORDER BY .* DESC", "LIMIT 5"],
+    "forbidden_patterns": ["SELECT \\*"],
+    "expected_chart_type": "bar",
+    "notes": "Chart intent with ordering and limit."
+  },
+  {
+    "id": "q03",
+    "tier": "core",
+    "question": "Plot monthly revenue trend for 2025 as a line chart.",
+    "expected_intent": "chart",
+    "expected_sql": "SELECT month, SUM(revenue) AS total_revenue FROM {table} WHERE year = 2025 GROUP BY month ORDER BY month",
+    "expected_columns": ["month", "total_revenue"],
+    "required_patterns": ["GROUP BY", "ORDER BY"],
+    "forbidden_patterns": ["SELECT \\*"],
+    "expected_chart_type": "line",
+    "notes": "Time series line chart."
+  },
+  {
+    "id": "q04",
+    "tier": "edge",
+    "question": "How are you feeling today?",
+    "expected_intent": "reject",
+    "expected_sql": null,
+    "expected_columns": [],
+    "required_patterns": [],
+    "forbidden_patterns": [],
+    "expected_chart_type": "none",
+    "notes": "Off-topic; must reject, no SQL."
+  },
+  {
+    "id": "q05",
+    "tier": "edge",
+    "question": "Show me sales.",
+    "expected_intent": "clarify",
+    "expected_sql": null,
+    "expected_columns": [],
+    "required_patterns": [],
+    "forbidden_patterns": [],
+    "expected_chart_type": "none",
+    "notes": "Ambiguous; should ask a clarifying question."
+  },
+  {
+    "id": "q06",
+    "tier": "regression",
+    "question": "List every column from the orders table.",
+    "expected_intent": "data",
+    "expected_sql": "SELECT order_id, customer_id, amount, created_at FROM {table}",
+    "expected_columns": ["order_id", "customer_id", "amount", "created_at"],
+    "required_patterns": [],
+    "forbidden_patterns": ["SELECT \\*"],
+    "expected_chart_type": "none",
+    "notes": "Regression: model historically emitted SELECT * here."
+  }
+]

@@ -1,0 +1,199 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Nightly L3 (execution-parity) eval run.
+    - cron: "0 6 * * *"
+
+permissions:
+  contents: read
+
+env:
+  API_DIR: src/UnifiedIQ-api
+  UI_DIR: products/UnifiedIQ-ui
+
+jobs:
+  # Path-based change detection gates the api/ui jobs.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'src/UnifiedIQ-api/**'
+            ui:
+              - 'products/UnifiedIQ-ui/**'
+
+  lint:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: needs.changes.outputs.api == 'true'
+        with:
+          python-version: "3.12"
+      - name: API lint (ruff)
+        if: needs.changes.outputs.api == 'true'
+        working-directory: ${{ env.API_DIR }}
+        run: |
+          pip install ruff
+          ruff check .
+          ruff format --check .
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.ui == 'true'
+        with:
+          node-version: "22"
+      - name: UI lint (eslint)
+        if: needs.changes.outputs.ui == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        run: |
+          npm ci
+          npm run lint
+
+  test:
+    needs: [changes, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        if: needs.changes.outputs.api == 'true'
+        with:
+          python-version: "3.12"
+      - name: API tests (pytest)
+        if: needs.changes.outputs.api == 'true'
+        working-directory: ${{ env.API_DIR }}
+        run: |
+          pip install -e ".[dev]"
+          pytest
+      - uses: actions/setup-node@v4
+        if: needs.changes.outputs.ui == 'true'
+        with:
+          node-version: "22"
+      - name: UI typecheck + build
+        if: needs.changes.outputs.ui == 'true'
+        working-directory: ${{ env.UI_DIR }}
+        env:
+          SKIP_ENV_VALIDATION: "1"
+        run: |
+          npm ci
+          npx tsc --noEmit
+          npm run build
+
+  # PRs: L1 (syntax) + L2 (structure) only.
+  eval:
+    needs: [changes, test]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run eval (L1+L2)
+        working-directory: ${{ env.API_DIR }}
+        env:
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          pip install -e ".[dev]"
+          python eval/run_eval.py \
+            --golden eval/golden_test_set.json \
+            --write-report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report
+          path: ${{ env.API_DIR }}/eval/results/
+
+  # Nightly: add L3 (execution parity) against the warehouse.
+  eval-nightly-l3:
+    needs: changes
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run eval (L1+L2+L3)
+        working-directory: ${{ env.API_DIR }}
+        env:
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          WAREHOUSE_SERVER_HOSTNAME: ${{ secrets.WAREHOUSE_SERVER_HOSTNAME }}
+          WAREHOUSE_HTTP_PATH: ${{ secrets.WAREHOUSE_HTTP_PATH }}
+          WAREHOUSE_ACCESS_TOKEN: ${{ secrets.WAREHOUSE_ACCESS_TOKEN }}
+        run: |
+          pip install -e ".[dev]"
+          python eval/run_eval.py \
+            --golden eval/golden_test_set.json \
+            --run-l3 --write-report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-report-nightly
+          path: ${{ env.API_DIR }}/eval/results/
+
+  build:
+    needs: test
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -t unifiediq-api:${{ github.sha }} "$API_DIR"
+      - name: Build UI image
+        run: docker build -t unifiediq-ui:${{ github.sha }} "$UI_DIR"
+
+  push:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Push images
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "$REGISTRY" ]; then
+            echo "::notice::REGISTRY secret not set; skipping push."
+            exit 0
+          fi
+          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY" \
+            -u "$REGISTRY_USERNAME" --password-stdin
+          for svc in api ui; do
+            src="src/UnifiedIQ-api"
+            [ "$svc" = ui ] && src="products/UnifiedIQ-ui"
+            docker build -t "$REGISTRY/unifiediq-$svc:${{ github.sha }}" "$src"
+            docker push "$REGISTRY/unifiediq-$svc:${{ github.sha }}"
+          done
+
+  deploy:
+    needs: push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy (Docker Compose target)
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "$DEPLOY_HOST" ]; then
+            echo "::notice::DEPLOY_HOST not set; skipping deploy."
+            exit 0
+          fi
+          echo "Deploying ${{ github.sha }} to $DEPLOY_HOST"
+          # Provisioned deploy: ship compose file and pull+up on the host.
