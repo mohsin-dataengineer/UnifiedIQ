@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import sqlglot
 from fastapi import APIRouter, Depends
 
@@ -13,6 +15,27 @@ from app.models.responses import AlertSpec
 from app.prompts.alert_system import ALERT_SYSTEM
 
 router = APIRouter(prefix="/api", tags=["alerts"])
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_SLACK_RE = re.compile(r"^[#@][\w._-]+$")
+
+
+def _validate_recipient(channel: str, recipient: str | None) -> None:
+    if not recipient or not recipient.strip():
+        raise AppError(
+            BAD_REQUEST,
+            f"Recipient is required for {channel}.",
+            status_code=422,
+        )
+    r = recipient.strip()
+    if channel == "email" and not _EMAIL_RE.match(r):
+        raise AppError(BAD_REQUEST, "Recipient must be a valid email address.", status_code=422)
+    if channel == "slack" and not _SLACK_RE.match(r):
+        raise AppError(
+            BAD_REQUEST,
+            "Slack recipient must look like #channel or @user.",
+            status_code=422,
+        )
 
 
 @router.post("/alerts", response_model=Alert)
@@ -38,6 +61,18 @@ async def create_alert(
         sqlglot.transpile(spec.metric_sql, read="databricks", write="databricks")
     except sqlglot.errors.ParseError as exc:
         raise AppError(SQL_INVALID, f"Alert SQL did not parse: {exc}", status_code=422) from exc
+
+    # User-controlled overrides for delivery, cadence, and schedule.
+    if body.channel is not None:
+        spec.channel = body.channel
+    if body.cadence_minutes is not None:
+        spec.cadence_minutes = body.cadence_minutes
+    if body.recipient is not None:
+        spec.recipient = body.recipient.strip() or None
+    if body.scheduled_at is not None:
+        spec.scheduled_at = body.scheduled_at
+    if spec.channel in ("email", "slack"):
+        _validate_recipient(spec.channel, spec.recipient)
 
     return await state.alerts.create(user.email, body.question, spec)
 

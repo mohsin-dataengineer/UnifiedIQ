@@ -70,6 +70,9 @@ class AlertService:
         self._wh = warehouse
         self._registry = registry
         self._table = settings.alerts_table_name
+        # When known to be zero, the scheduler short-circuits the periodic
+        # warehouse poll so the SQL warehouse can auto-suspend.
+        self._active_count: int | None = None
 
     async def ensure_table(self) -> None:
         ddl = (
@@ -79,9 +82,15 @@ class AlertService:
             "threshold DOUBLE, channel STRING, recipient STRING, "
             "cadence_minutes INT, enabled BOOLEAN, last_state STRING, "
             "last_value DOUBLE, last_checked_at TIMESTAMP, "
+            "scheduled_at TIMESTAMP, "
             "created_at TIMESTAMP) USING DELTA"
         )
         await self._wh.execute(ddl)
+        # Idempotent migration for tables created before scheduled_at existed.
+        with contextlib.suppress(Exception):
+            await self._wh.execute(
+                f"ALTER TABLE {self._table} ADD COLUMNS (scheduled_at TIMESTAMP)"
+            )
 
     def _row_to_alert(self, r: dict) -> Alert:
         return Alert(
@@ -99,6 +108,7 @@ class AlertService:
             last_state=r.get("last_state") or "pending",
             last_value=(float(r["last_value"]) if r.get("last_value") is not None else None),
             last_checked_at=r.get("last_checked_at"),
+            scheduled_at=r.get("scheduled_at"),
             created_at=r.get("created_at") or _now(),
         )
 
@@ -114,6 +124,7 @@ class AlertService:
             channel=spec.channel,
             recipient=spec.recipient,
             cadence_minutes=max(5, int(spec.cadence_minutes or 60)),
+            scheduled_at=spec.scheduled_at,
         )
         await self._wh.execute(
             f"INSERT INTO {self._table} VALUES ("
@@ -122,8 +133,14 @@ class AlertService:
             f"{_q(alert.comparator)}, {alert.threshold}, "
             f"{_q(alert.channel)}, {_q(alert.recipient)}, "
             f"{alert.cadence_minutes}, {str(alert.enabled).lower()}, "
-            f"{_q(alert.last_state)}, NULL, NULL, {_ts(alert.created_at)})"
+            f"{_q(alert.last_state)}, NULL, NULL, "
+            f"{_ts(alert.scheduled_at)}, {_ts(alert.created_at)})"
         )
+        # Wake the scheduler immediately - skip the empty-state short-circuit.
+        if self._active_count is None:
+            self._active_count = 1
+        else:
+            self._active_count += 1
         return alert
 
     async def list(self, user_email: str) -> list[Alert]:
@@ -137,6 +154,19 @@ class AlertService:
         await self._wh.execute(
             f"DELETE FROM {self._table} WHERE id = {_q(alert_id)} AND user_email = {_q(user_email)}"
         )
+        if self._active_count is not None:
+            self._active_count = max(0, self._active_count - 1)
+        # Also purge in-app notifications so the bell doesn't keep showing
+        # fires from a deleted alert.
+        try:
+            in_app = self._registry.get("in_app")
+            await in_app.execute(
+                "clear_alert",
+                {"user_email": user_email, "alert_id": alert_id},
+                ctx=await in_app.authenticate(None),
+            )
+        except Exception:  # noqa: BLE001 - cleanup is best-effort
+            logger.exception("in_app clear_alert failed")
 
     async def _evaluate(self, alert: Alert) -> tuple[float | None, str | None]:
         try:
@@ -173,6 +203,7 @@ class AlertService:
                     "user_email": alert.user_email,
                     "title": alert.title,
                     "message": msg,
+                    "alert_id": alert.id,
                 },
                 ctx=await in_app.authenticate(None),
             )
@@ -202,19 +233,33 @@ class AlertService:
             except Exception:  # noqa: BLE001 - channel may be unconfigured
                 logger.exception("alert %s channel delivery failed", alert.id)
 
+    async def _disable(self, alert: Alert) -> None:
+        await self._wh.execute(
+            f"UPDATE {self._table} SET enabled = false WHERE id = {_q(alert.id)}"
+        )
+        alert.enabled = False
+        if self._active_count is not None:
+            self._active_count = max(0, self._active_count - 1)
+
     async def evaluate_one(self, alert: Alert) -> Alert:
         value, err = await self._evaluate(alert)
         if err is not None or value is None:
             await self._persist_state(alert, "error", None)
             alert.last_state = "error"
+            if alert.scheduled_at is not None:
+                await self._disable(alert)
             return alert
+        # One-shot scheduled alerts always fire on the scheduled run (even if
+        # last_state == "breached") because they only run once.
         is_breach = breached(value, alert.comparator, alert.threshold)
-        if is_breach and alert.last_state != "breached":
+        if is_breach and (alert.scheduled_at is not None or alert.last_state != "breached"):
             await self._fire(alert, value)
         new_state = "breached" if is_breach else "ok"
         await self._persist_state(alert, new_state, value)
         alert.last_state = new_state
         alert.last_value = value
+        if alert.scheduled_at is not None:
+            await self._disable(alert)
         return alert
 
     async def run_now(self, user_email: str, alert_id: str) -> Alert | None:
@@ -224,14 +269,37 @@ class AlertService:
         return None
 
     async def evaluate_due(self) -> int:
+        # Initialize the in-process count on first tick so an idle scheduler
+        # can then skip the warehouse poll entirely until an alert is created.
+        if self._active_count is None:
+            try:
+                rows = await self._wh.execute(
+                    f"SELECT COUNT(*) AS n FROM {self._table} WHERE enabled = true"
+                )
+                self._active_count = int(rows[0]["n"]) if rows else 0
+            except Exception:  # noqa: BLE001 - safe fallback; try again next tick
+                self._active_count = None
+                return 0
+        if self._active_count == 0:
+            return 0
+
         rows = await self._wh.execute(f"SELECT * FROM {self._table} WHERE enabled = true")
+        # Keep the count in sync with what the warehouse actually has.
+        self._active_count = len(rows)
+        if self._active_count == 0:
+            return 0
         now = _now()
         checked = 0
         for r in rows:
             alert = self._row_to_alert(r)
-            due = alert.last_checked_at is None or (
-                alert.last_checked_at <= now - timedelta(minutes=alert.cadence_minutes)
-            )
+            if alert.scheduled_at is not None:
+                # One-shot: due when the scheduled time has arrived.
+                due = alert.scheduled_at <= now
+            else:
+                # Recurring: due if never checked or beyond the cadence window.
+                due = alert.last_checked_at is None or (
+                    alert.last_checked_at <= now - timedelta(minutes=alert.cadence_minutes)
+                )
             if not due:
                 continue
             try:

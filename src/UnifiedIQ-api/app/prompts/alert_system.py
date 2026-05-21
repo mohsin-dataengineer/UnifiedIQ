@@ -16,6 +16,7 @@ to the threshold (fire when "metric <comparator> threshold" is true).
 clearly ask for Slack or email.
 - recipient: slack channel (e.g. #alerts) or email address if given, else null.
 - cadence_minutes: how often to check, in minutes. Default 60. Minimum 5.
+- scheduled_at: leave null. The user supplies any specific schedule outside the prompt.
 
 If the request is not a valid monitorable alert, set reject_reason and leave \
 metric_sql null.

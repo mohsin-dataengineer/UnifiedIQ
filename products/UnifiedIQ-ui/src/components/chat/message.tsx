@@ -54,7 +54,12 @@ export function Message({
         )}
 
         {turn.chart && turn.chartData && turn.chartData.length > 0 && (
-          <ResultView spec={turn.chart} data={turn.chartData} />
+          <ResultView
+            spec={turn.chart}
+            data={turn.chartData}
+            question={turn.question}
+            sql={turn.sql}
+          />
         )}
 
         {turn.content && (
@@ -80,7 +85,7 @@ export function Message({
         )}
 
         {turn.error && (
-          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+          <p className="mt-2 rounded-lg bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger-fg)]">
             {turn.error}
           </p>
         )}

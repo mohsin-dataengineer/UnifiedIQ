@@ -17,10 +17,15 @@ from app.models.domain import CurrentUser
 from app.services.alerts import AlertScheduler, AlertService
 from app.services.auth import ServiceAuthService, UserAuthService
 from app.services.cache import CacheService
+from app.services.canvases import CanvasService
 from app.services.integration_registry import IntegrationRegistry
 from app.services.llm import LLMService
+from app.services.schema import SchemaService
 from app.services.session_store import SessionStore
 from app.services.telemetry import TelemetryLogger
+from app.services.user_memory import UserMemoryService
+from app.services.verifier import VerifierService
+from app.services.views import ViewsService
 from app.services.warehouse import DatabricksWarehouse, WarehouseService
 
 
@@ -39,6 +44,11 @@ class AppState:
     in_app: InAppIntegration
     alerts: AlertService
     alert_scheduler: AlertScheduler
+    views: ViewsService
+    canvases: CanvasService
+    verifier: VerifierService
+    schema: SchemaService
+    user_memory: UserMemoryService
 
 
 def build_state(settings: Settings) -> AppState:
@@ -47,10 +57,13 @@ def build_state(settings: Settings) -> AppState:
     registry = IntegrationRegistry()
     in_app = InAppIntegration(settings)
     alerts = AlertService(settings, warehouse, registry)
+    llm = LLMService(settings)
+    canvases = CanvasService(settings, warehouse)
+    views = ViewsService(settings, warehouse, canvases)
     return AppState(
         settings=settings,
         http=http,
-        llm=LLMService(settings),
+        llm=llm,
         warehouse=warehouse,
         cache=CacheService(maxsize=settings.cache_max_size, ttl=settings.cache_ttl_seconds),
         sessions=SessionStore(settings),
@@ -61,6 +74,11 @@ def build_state(settings: Settings) -> AppState:
         in_app=in_app,
         alerts=alerts,
         alert_scheduler=AlertScheduler(settings, alerts),
+        views=views,
+        canvases=canvases,
+        verifier=VerifierService(llm, warehouse),
+        schema=SchemaService(settings, warehouse),
+        user_memory=UserMemoryService(settings, warehouse),
     )
 
 

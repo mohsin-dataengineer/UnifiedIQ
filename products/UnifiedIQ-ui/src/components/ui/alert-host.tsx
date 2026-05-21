@@ -10,11 +10,11 @@ const STYLE: Record<string, { cls: string; icon: React.ReactNode }> = {
     icon: <Info size={15} />,
   },
   error: {
-    cls: "bg-red-600 text-white",
+    cls: "bg-[var(--danger-fg)] text-white",
     icon: <AlertTriangle size={15} />,
   },
   success: {
-    cls: "bg-green-600 text-white",
+    cls: "bg-[var(--success-fg)] text-white",
     icon: <CheckCircle2 size={15} />,
   },
 };

@@ -44,6 +44,16 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return unwrap<T>(await fetch(`/api/${path}`, { method: "DELETE" }));
 }
 
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  return unwrap<T>(
+    await fetch(`/api/${path}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
 export function streamChat(
   body: unknown,
   signal: AbortSignal,

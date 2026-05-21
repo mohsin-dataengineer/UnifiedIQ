@@ -63,8 +63,18 @@ class Settings(BaseSettings):
     alerts_enabled: bool = True
     # Empty -> derived as <catalog>.<schema>.unifiediq_alerts
     alerts_table: str = ""
-    alerts_poll_interval_seconds: float = 60.0
+    # Default matches the minimum alert cadence; scheduler also short-circuits
+    # the warehouse SELECT when no alerts are active.
+    alerts_poll_interval_seconds: float = 300.0
     alerts_in_app_max: int = 100
+
+    # --- Memory (Tiers 1 & 4) ---
+    # Comma-separated <catalog>.<schema> values used by Tier 1 schema grounding.
+    schema_sources: str = "workspace.default,samples.nyctaxi"
+    schema_ttl_seconds: int = 3600
+    schema_max_tables_injected: int = 30
+    # Empty -> <catalog>.<schema>.user_memory (Tier 4).
+    user_memory_table: str = ""
 
     # --- Integrations: Slack ---
     slack_bot_token: str = ""
@@ -93,6 +103,24 @@ class Settings(BaseSettings):
         if self.alerts_table:
             return self.alerts_table
         return f"{self.warehouse_catalog}.{self.warehouse_schema}.unifiediq_alerts"
+
+    @property
+    def schema_source_list(self) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for raw in self.schema_sources.split(","):
+            cleaned = raw.strip()
+            if not cleaned or "." not in cleaned:
+                continue
+            catalog, _, schema = cleaned.partition(".")
+            if catalog and schema:
+                out.append((catalog, schema))
+        return out
+
+    @property
+    def user_memory_table_name(self) -> str:
+        if self.user_memory_table:
+            return self.user_memory_table
+        return f"{self.warehouse_catalog}.{self.warehouse_schema}.user_memory"
 
 
 @lru_cache

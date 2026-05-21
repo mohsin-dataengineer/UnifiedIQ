@@ -68,6 +68,21 @@ async def test_evaluate_fires_once_on_transition():
     assert len(in_app.recent("u@x.com")) == 1
 
 
+async def test_delete_clears_in_app_notifications():
+    settings = Settings()
+    registry = IntegrationRegistry()
+    in_app = InAppIntegration(settings)
+    registry.register(in_app)
+    svc = AlertService(settings, MetricWarehouse(42), registry)
+
+    alert = _alert()
+    await svc.evaluate_one(alert)
+    assert len(in_app.recent("u@x.com")) == 1
+
+    await svc.delete("u@x.com", alert.id)
+    assert in_app.recent("u@x.com") == []
+
+
 async def test_evaluate_ok_when_not_breached():
     settings = Settings()
     registry = IntegrationRegistry()

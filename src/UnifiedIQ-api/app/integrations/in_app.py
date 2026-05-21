@@ -23,17 +23,32 @@ class InAppIntegration(BaseIntegration):
         return AuthContext(principal="in-app")
 
     async def execute(self, action: str, params: dict[str, Any], *, ctx: AuthContext) -> Any:
-        if action != "notify":
-            return {"ok": False}
-        n = Notification(
-            id=uuid.uuid4().hex,
-            user_email=params["user_email"],
-            title=params["title"],
-            message=params["message"],
-        )
-        feed = self._feeds.setdefault(n.user_email, deque(maxlen=self._max))
-        feed.appendleft(n)
-        return {"ok": True, "id": n.id}
+        if action == "notify":
+            n = Notification(
+                id=uuid.uuid4().hex,
+                user_email=params["user_email"],
+                title=params["title"],
+                message=params["message"],
+                alert_id=params.get("alert_id"),
+            )
+            feed = self._feeds.setdefault(n.user_email, deque(maxlen=self._max))
+            feed.appendleft(n)
+            return {"ok": True, "id": n.id}
+        if action == "clear_alert":
+            # Drop any notifications belonging to a deleted alert so the
+            # bell doesn't keep showing stale fires.
+            user_email = params["user_email"]
+            alert_id = params["alert_id"]
+            feed = self._feeds.get(user_email)
+            if feed is None:
+                return {"ok": True, "cleared": 0}
+            kept = [n for n in feed if n.alert_id != alert_id]
+            cleared = len(feed) - len(kept)
+            feed.clear()
+            for n in kept:
+                feed.append(n)
+            return {"ok": True, "cleared": cleared}
+        return {"ok": False}
 
     async def health(self) -> HealthStatus:
         return HealthStatus(name=self.name, healthy=True)

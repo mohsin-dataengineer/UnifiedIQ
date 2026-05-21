@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Message } from "@/components/chat/message";
 import { NotificationsBell } from "@/components/chat/notifications-bell";
 import { Sidebar, SUGGESTIONS } from "@/components/chat/sidebar";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAlerts } from "@/contexts/alert-context";
 import { useConversation } from "@/contexts/conversation-context";
 import { streamChat } from "@/lib/api-client";
@@ -13,7 +14,8 @@ import { readSSE } from "@/lib/sse";
 import type { ChartSpec, Citation, Row, ThinkingStep } from "@/lib/types";
 
 export function ChatPanel({ email }: { email: string }) {
-  const { turns, addTurn, patchLast, appendToLast, reset } = useConversation();
+  const { turns, addTurn, patchLast, appendToLast, newChat } =
+    useConversation();
   const { notify } = useAlerts();
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -40,6 +42,7 @@ export function ChatPanel({ email }: { email: string }) {
       id: crypto.randomUUID(),
       role: "assistant",
       content: "",
+      question: q,
       thinking: [],
     });
 
@@ -111,7 +114,7 @@ export function ChatPanel({ email }: { email: string }) {
 
   return (
     <div className="flex h-screen">
-      <Sidebar email={email} onNewChat={reset} onPick={(q) => void send(q)} />
+      <Sidebar email={email} onNewChat={newChat} onPick={(q) => void send(q)} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-[var(--border)] bg-[var(--surface)] px-6 py-4">
@@ -123,7 +126,10 @@ export function ChatPanel({ email }: { email: string }) {
               Natural-language KPIs, visualizations, and always-on alerts
             </p>
           </div>
-          <NotificationsBell />
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <NotificationsBell />
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto px-6 py-6">

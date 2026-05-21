@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,22 @@ class SQLGenerationResponse(BaseModel):
     rejection_reason: str | None = None
 
 
+class AlternativeSQLResponse(BaseModel):
+    """LLM picks an independent SQL approach to compute the same metric."""
+
+    alternative_sql: str | None = None
+    approach: str = ""
+    reject_reason: str | None = None
+
+
+class JudgeScore(BaseModel):
+    """LLM-as-judge verdict over two result snapshots for the same question."""
+
+    verdict: Literal["agree", "disagree", "inconclusive"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str
+
+
 Comparator = Literal["lt", "lte", "gt", "gte", "eq", "neq"]
 AlertChannel = Literal["in_app", "slack", "email"]
 
@@ -34,6 +51,7 @@ class AlertSpec(BaseModel):
     channel: AlertChannel = "in_app"
     recipient: str | None = None
     cadence_minutes: int = 60
+    scheduled_at: datetime | None = None
     reject_reason: str | None = None
 
 

@@ -45,9 +45,25 @@ def _validate_sql(sql: str) -> None:
         raise AppError(SQL_INVALID, f"Generated SQL did not parse: {exc}", status_code=422) from exc
 
 
-def _build_messages(body: ChatRequest) -> list[dict[str, str]]:
+async def _build_messages(
+    body: ChatRequest, state: AppState, user_email: str
+) -> list[dict[str, str]]:
+    # Memory tiers 1 + 4: schema grounding and per-user facts are injected
+    # into the planner system message so the model stops inventing tables.
+    schema_block = ""
+    try:
+        schema_block = await state.schema.context_block(body.question)
+    except Exception:  # noqa: BLE001 - chat must work without schema
+        schema_block = ""
+    memory_block = await state.user_memory.context_block(user_email)
+
+    system = SQL_GENERATION_SYSTEM
+    if schema_block:
+        system = f"{system}\n\n{schema_block}"
+    if memory_block:
+        system = f"{system}\n\n{memory_block}"
     return [
-        {"role": "system", "content": SQL_GENERATION_SYSTEM},
+        {"role": "system", "content": system},
         *({"role": m.role, "content": m.content} for m in body.history),
         {"role": "user", "content": body.question},
     ]
@@ -142,7 +158,8 @@ async def chat(
     session_id = body.session_id or uuid.uuid4().hex
 
     plan, _completion = await state.llm.chat_structured(
-        _build_messages(body), response_model=SQLGenerationResponse
+        await _build_messages(body, state, user.email),
+        response_model=SQLGenerationResponse,
     )
 
     rows: list[dict] = []
@@ -202,7 +219,8 @@ async def chat_stream(
                 {"step": "plan", "detail": "Analyzing the question"},
             )
             plan, _ = await state.llm.chat_structured(
-                _build_messages(body), response_model=SQLGenerationResponse
+                await _build_messages(body, state, user.email),
+                response_model=SQLGenerationResponse,
             )
 
             rows: list[dict] = []

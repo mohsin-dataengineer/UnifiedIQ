@@ -47,7 +47,7 @@ export function NotificationsBell() {
       >
         <Bell size={16} />
         {unread > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white">
+          <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--danger-fg)] px-1 text-[10px] font-semibold text-white">
             {unread}
           </span>
         )}
@@ -65,10 +65,7 @@ export function NotificationsBell() {
           ) : (
             <div className="max-h-80 space-y-1 overflow-y-auto">
               {items.map((n) => (
-                <div
-                  key={n.id}
-                  className="rounded-lg bg-[var(--bg)] px-3 py-2"
-                >
+                <div key={n.id} className="rounded-lg bg-[var(--bg)] px-3 py-2">
                   <div className="text-xs font-medium text-[var(--fg)]">
                     {n.title}
                   </div>

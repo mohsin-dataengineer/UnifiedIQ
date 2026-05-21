@@ -5,6 +5,7 @@ import {
   Download,
   LineChart as LineIcon,
   PieChart as PieIcon,
+  Pin,
   Table as TableIcon,
   AreaChart as AreaIcon,
 } from "lucide-react";
@@ -12,7 +13,11 @@ import { useMemo, useState } from "react";
 
 import { ChartRenderer } from "@/components/chat/chart-renderer";
 import { DataTable } from "@/components/chat/data-table";
+import { VerifyPanel } from "@/components/chat/verify-panel";
 import { Segmented } from "@/components/ui/segmented";
+import { useAlerts } from "@/contexts/alert-context";
+import { useCanvasWorkspace } from "@/contexts/canvas-workspace-context";
+import { ApiError, apiPost } from "@/lib/api-client";
 import {
   columnsOf,
   downloadCsv,
@@ -21,7 +26,7 @@ import {
   isNumeric,
   numericColumns,
 } from "@/lib/format";
-import type { ChartSpec, Row } from "@/lib/types";
+import type { ChartSpec, Row, UserView } from "@/lib/types";
 
 function KpiCards({ row }: { row: Row }) {
   const cols = Object.keys(row);
@@ -53,16 +58,70 @@ function KpiCards({ row }: { row: Row }) {
 export function ResultView({
   spec,
   data,
+  question,
+  sql,
+  colors,
+  xLabel,
+  yLabel,
+  filterText,
 }: {
   spec?: ChartSpec;
   data: Row[];
+  question?: string;
+  sql?: string;
+  colors?: string[] | null;
+  xLabel?: string | null;
+  yLabel?: string | null;
+  filterText?: string | null;
 }) {
+  const { notify } = useAlerts();
+  const { activeDraftCanvasId, notifyWorkspaceChanged } = useCanvasWorkspace();
+  const [pinned, setPinned] = useState(false);
+  const [pinning, setPinning] = useState(false);
+
+  async function pin(currentView: string) {
+    if (!question || !sql || pinning) return;
+    const defaultName = question.slice(0, 80);
+    const name = window.prompt("Name this view", defaultName)?.trim();
+    if (!name) return;
+    setPinning(true);
+    try {
+      await apiPost<UserView>("views", {
+        name,
+        question,
+        sql,
+        chart_config: spec ?? null,
+        default_view: currentView,
+        canvas_id: activeDraftCanvasId,
+      });
+      setPinned(true);
+      notifyWorkspaceChanged();
+      notify("success", "Pinned to canvas");
+    } catch (e) {
+      notify("error", e instanceof ApiError ? e.message : "Could not pin view");
+    } finally {
+      setPinning(false);
+    }
+  }
+
+  const displayed = useMemo(() => {
+    const q = (filterText ?? "").trim().toLowerCase();
+    if (!q) return data;
+    return data.filter((r) =>
+      Object.values(r).some((v) =>
+        String(v ?? "")
+          .toLowerCase()
+          .includes(q),
+      ),
+    );
+  }, [data, filterText]);
+
   const cols = columnsOf(data);
   const nums = numericColumns(data);
   const x = spec?.x || cols.find((c) => !nums.includes(c)) || cols[0] || "";
   const y = spec?.y?.length ? spec.y : nums;
 
-  const singleRow = data.length === 1;
+  const singleRow = displayed.length === 1;
   const chartable = !singleRow && !!x && y.length > 0;
 
   const [view, setView] = useState<string>(() => {
@@ -110,8 +169,9 @@ export function ResultView({
     <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-[var(--muted)]">
-          {data.length.toLocaleString()} row
-          {data.length === 1 ? "" : "s"}
+          {displayed.length.toLocaleString()} row
+          {displayed.length === 1 ? "" : "s"}
+          {filterText ? ` (of ${data.length.toLocaleString()} filtered)` : ""}
         </span>
         <div className="flex items-center gap-2">
           {!singleRow && (
@@ -119,25 +179,48 @@ export function ResultView({
           )}
           <button
             type="button"
-            onClick={() => downloadCsv(data)}
+            onClick={() => downloadCsv(displayed)}
             className="flex items-center gap-1 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] transition-colors hover:text-[var(--fg)]"
           >
             <Download size={13} /> CSV
           </button>
+          {question && sql && (
+            <button
+              type="button"
+              onClick={() => void pin(view)}
+              disabled={pinning || pinned}
+              className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition-colors disabled:opacity-50 ${
+                pinned
+                  ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                  : "border-[var(--border)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+              }`}
+            >
+              <Pin size={13} /> {pinned ? "Pinned" : "Pin"}
+            </button>
+          )}
         </div>
       </div>
 
       {view === "kpi" ? (
-        <KpiCards row={data[0]} />
+        <KpiCards row={displayed[0] ?? data[0]} />
       ) : view === "table" ? (
-        <DataTable rows={data} />
+        <DataTable rows={displayed} />
       ) : (
         <ChartRenderer
           type={view as "bar" | "line" | "area" | "pie"}
           x={x}
           y={y}
-          data={data}
+          data={displayed}
+          colors={colors}
+          xLabel={xLabel}
+          yLabel={yLabel}
         />
+      )}
+
+      {question && sql && (
+        <div className="mt-3 flex justify-start">
+          <VerifyPanel question={question} sql={sql} />
+        </div>
       )}
     </div>
   );

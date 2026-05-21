@@ -20,7 +20,16 @@ from app.errors import BAD_REQUEST, INTERNAL, AppError
 from app.integrations.email_smtp import EmailIntegration
 from app.integrations.slack import SlackIntegration
 from app.observability import configure_logging, setup_telemetry
-from app.routers import alerts, chat, health, integrations
+from app.routers import (
+    alerts,
+    canvases,
+    chat,
+    health,
+    integrations,
+    memory,
+    verify,
+    views,
+)
 from app.workers import start_workers, stop_workers
 
 logger = logging.getLogger(__name__)
@@ -42,6 +51,22 @@ async def lifespan(app: FastAPI):
             await state.alerts.ensure_table()
         except Exception:  # noqa: BLE001 - app still serves without alerts
             logger.exception("alert table init failed")
+    try:
+        await state.canvases.ensure_table()
+    except Exception:  # noqa: BLE001 - canvas listing is best-effort
+        logger.exception("canvases table init failed")
+    try:
+        await state.views.ensure_table()
+    except Exception:  # noqa: BLE001 - dashboard pinning is best-effort
+        logger.exception("views table init failed")
+    try:
+        await state.views.backfill_canvas_ids()
+    except Exception:  # noqa: BLE001 - migration is best-effort
+        logger.exception("views canvas_id backfill failed")
+    try:
+        await state.user_memory.ensure_table()
+    except Exception:  # noqa: BLE001 - chat works without user memory
+        logger.exception("user_memory table init failed")
     try:
         yield
     finally:
@@ -115,8 +140,12 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router)
     app.include_router(chat.router)
+    app.include_router(verify.router)
     app.include_router(integrations.router)
     app.include_router(alerts.router)
+    app.include_router(views.router)
+    app.include_router(canvases.router)
+    app.include_router(memory.router)
 
     # Serve the prebuilt static UI (Next.js static export) if present.
     # Mounted last so /api/* and /docs resolve first; html=True gives SPA

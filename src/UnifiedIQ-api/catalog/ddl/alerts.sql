@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS unifiediq_alerts (
     last_state        VARCHAR(16)   NOT NULL,   -- pending|ok|breached|error
     last_value        DOUBLE,
     last_checked_at   TIMESTAMP,
+    scheduled_at      TIMESTAMP,                 -- one-shot: fire once at/after
     created_at        TIMESTAMP     NOT NULL,
     PRIMARY KEY (id)
 );
